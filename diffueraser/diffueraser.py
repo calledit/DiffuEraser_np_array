@@ -225,7 +225,7 @@ class DiffuEraser:
         self.guidance_scale = checkpoints[ckpt][2]
         if loaded != (ckpt + mode):
             self.pipeline.load_lora_weights(
-                "weights/PCM_Weights", weight_name=PCM_ckpts, subfolder=mode
+                "wangfuyun/PCM_Weights", weight_name=PCM_ckpts, subfolder=mode
             )
             loaded = ckpt + mode
 
