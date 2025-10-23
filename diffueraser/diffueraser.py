@@ -4,6 +4,7 @@ import cv2
 import os
 import numpy as np
 import torch
+from functools import partial
 import torchvision
 from einops import repeat
 from PIL import Image, ImageFilter
@@ -328,6 +329,7 @@ class DiffuEraser:
         seed=None,
         guidance_scale=None,
         blended=True,
+        progress=None,
     ):
         """
         Returns:
@@ -342,7 +344,10 @@ class DiffuEraser:
 
         if (max_img_size < 256 or max_img_size > 1920):
             raise ValueError("max_img_size must be in [256, 1920].")
-
+        
+        if progress is not None:
+            progress(52, "diffueraser preparing frames")
+        
         # ------------- Convert inputs to PIL and unify sizes -------------
         frames = _arrays_to_pil(video_frames_np)
         prioris = _arrays_to_pil(priori_frames_np)
@@ -394,7 +399,9 @@ class DiffuEraser:
 
         # Random generator
         generator = None if seed is None else torch.Generator(device=self.device).manual_seed(seed)
-
+        
+        if progress is not None:
+            progress(53, "diffueraser generating noice for sequence")
         # ---- random noise for the whole sequence ----
         tar_width, tar_height = img_size
         shape = (nframes, 4, tar_height // 8, tar_width // 8)
@@ -409,7 +416,8 @@ class DiffuEraser:
         noise_pre = randn_tensor(shape, device=torch.device(self.device), dtype=prompt_embeds_dtype, generator=generator)
         real_video_length = n_total_frames
         noise = repeat(noise_pre, "t c h w -> (repeat t) c h w", repeat=n_clip)[:real_video_length, ...]
-
+        if progress is not None:
+            progress(55, "diffueraser preprocessing frames")
         # ---- prepare priori -> VAE latents ----
         images_preprocessed = []
         for image in prioris:
@@ -429,7 +437,10 @@ class DiffuEraser:
         torch.cuda.empty_cache()
 
         timesteps = torch.tensor([0], device=self.device).long()
-
+        
+        
+        if progress is not None:
+            progress(58, "diffueraser doing sampled pre-inferance on subset of frames")
         # ---- Pre-inference (sampling some frames if long) ----
         if n_total_frames > nframes * 2:
             step = n_total_frames / nframes
@@ -453,6 +464,7 @@ class DiffuEraser:
                     generator=generator,
                     guidance_scale=guidance_scale_final,
                     latents=latents_pre,
+                    progress = partial(progress, 60, "diffueraser doing sampled pre-inferance on subset of frames", 70)
                 ).latents
             torch.cuda.empty_cache()
 
@@ -481,7 +493,10 @@ class DiffuEraser:
 
         gc.collect()
         torch.cuda.empty_cache()
-
+        
+        if progress is not None:
+            progress(70, "diffueraser doing inferance on all frames")
+            
         # ---- Frame-by-frame inference ----
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
         latents = noisy_latents
@@ -495,6 +510,7 @@ class DiffuEraser:
                 generator=generator,
                 guidance_scale=guidance_scale_final,
                 latents=latents,
+                progress = partial(progress, 70, "diffueraser doing full inferance", 90)
             ).frames
         images = images[:real_video_length]
 

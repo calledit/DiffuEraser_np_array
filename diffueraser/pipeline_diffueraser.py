@@ -877,6 +877,7 @@ class StableDiffusionDiffuEraserPipeline(
         clip_skip: Optional[int] = None,
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+        progress = None,
         **kwargs,
     ):
         r"""
@@ -1195,7 +1196,8 @@ class StableDiffusionDiffuEraserPipeline(
         is_torch_higher_equal_2_1 = is_torch_version(">=", "2.1")
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                
+                if progress is not None:
+                    progress(num_inference_steps, i)
                 count.zero_()
                 value.zero_()
                 ## swap

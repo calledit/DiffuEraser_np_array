@@ -236,7 +236,8 @@ class Propainter:
         neighbor_length=10,
         subvideo_length=80,
         raft_iter=20,
-        fp16=True
+        fp16=True,
+        progress=None
     ):
         """
         Returns:
@@ -246,7 +247,8 @@ class Propainter:
         use_half = True if fp16 else False
         if self.device == torch.device('cpu'):
             use_half = False
-
+        if progress is not None:
+            progress(21, "propainter dilating and normalizing input frames")
         # -------------------- read/normalize input frames --------------------
         assert isinstance(video_frames_np, (list, tuple)) and len(video_frames_np) > 0, "video_frames_np must be a non-empty list"
         # Convert to PIL (expect RGB arrays)
@@ -290,9 +292,13 @@ class Propainter:
         masks_dilated = to_tensors()(masks_dilated).unsqueeze(0)
         frames, flow_masks, masks_dilated = frames.to(self.device), flow_masks.to(self.device), masks_dilated.to(self.device)
 
+        
         # -------------------- ProPainter inference (unchanged) --------------------
         video_length = frames.size(1)
         with torch.no_grad():
+            
+            if progress is not None:
+                progress(24, "propainter computing raft flow on input frames")
             # ---- compute flow (RAFT) ----
             new_longer_edge = max(frames.size(-1), frames.size(-2))
             if new_longer_edge <= 640:
@@ -361,7 +367,11 @@ class Propainter:
             torch.cuda.empty_cache(); gc.collect()
 
             masks_dilated_ori = masks_dilated.clone()
-
+            
+            
+            if progress is not None:
+                progress(27, "propainter pre-propagation")
+            
             # ---- (optional) pre-propagation on sampled frames ----
             subvideo_length_img_prop = min(100, subvideo_length)
             if len(frames[0]) > subvideo_length_img_prop:
@@ -461,7 +471,10 @@ class Propainter:
                 for i, index in enumerate(index_sample):
                     frames[0][index] = updated_frames[0][i]
                     masks_dilated[0][index] = updated_masks[0][i]
-
+            
+            if progress is not None:
+                progress(27, "propainter pre-propagation")
+            
             # ---- full image propagation ----
             masked_frames = frames * (1 - masks_dilated)
             if video_length > subvideo_length_img_prop:
@@ -499,8 +512,13 @@ class Propainter:
         ref_num = (subvideo_length // ref_stride) if video_length > subvideo_length else -1
 
         torch.cuda.empty_cache()
+        
+        if progress is not None:
+            progress(30, "propainter full image propagation")
         # ---- feature propagation + transformer ----
         for f in range(0, video_length, neighbor_stride):
+            if progress is not None:
+                progress(30, "propainter full image propagation frame: " + str(f), tot_nr_frames = video_length, end_percent = 50, current_frame = f)
             neighbor_ids = [i for i in range(max(0, f - neighbor_stride), min(video_length, f + neighbor_stride + 1))]
             ref_ids = get_ref_index(f, neighbor_ids, video_length, ref_stride, ref_num)
             selected_imgs = updated_frames[:, neighbor_ids + ref_ids, :, :, :]
